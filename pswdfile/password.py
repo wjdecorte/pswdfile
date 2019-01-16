@@ -10,9 +10,9 @@
 
 @author:     Jason DeCorte
 
-@copyright:  2015 Equifax. All rights reserved.
+@copyright:  2015 DeCorte Industries.com. All rights reserved.
 
-@contact:    jason.decorte@equifax.com
+@contact:    jdecorte@decorteindustries.com
 
 Version History
  08/31/2005| Jason DeCorte   | Rotor is deprecated as of 2.3.  Implemented a new
@@ -21,57 +21,65 @@ Version History
  08/06/2007| Jason DeCorte   | Updated the default directories and added isdir check
  03/03/2014| Jason DeCorte   | Complete overhaul for Python 2.7 and new crypto package v5.0
 
-5.1 jwd 4/7/2015
+0.04 jwd3 4/7/2015
     Updated to only store if data_file_dir is provided and removed default value for data_file_dir
     Removed class attributes version and version date
     Added ability to use for encrypting/decrypting passwords without username
     Added clause to store value only if at least username is provided
     Updated string formatting and variable names
     Added generate key method
-5.2 jwd 2/17/2016
+0.05 jwd3 2/17/2016
     Added mode parameter to control whether the file is opened as read-only or read/write
-5.3 jwd 7/19/2016
+0.06 jwd3 7/19/2016
     Add generate_key method
     Added optional parameter to encrypt method so password could be passed in
     Replaced b64encode/b64decode with urlsafe versions
-5.3.1 jwd3 7/20/2016
+0.07 jwd3 7/20/2016
     Due to compatibility issues, created Password2 to do the url safe b64 encode/decode
     Password2 class is the start of re-engineering this class to separate encryption/decryption from storage
     Updated Password class to inherit from object
-5.3.2 jwd3 09/12/2016
+0.08 jwd3 09/12/2016
     Found an issue in decrypt when passwords exceeded 31 characters - changed to strip last 32 characters
     as key
+0.09 jwd3 03/15/2017
+    Added property decorator and changed attributes to be private
+0.10 jwd3 05/17/2017
+    Removed print statement
+    Code cleanup
+    Changed version to 0.xx where xx is a sequential number - major/minor/revision format not needed
 """
 import os
 import sys
 import base64
+import cPickle
 import shelve
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES
 
 __all__ = ['Password']
-__version__ = "5.3.2"
+__version__ = "0.10"
 __date__ = '2003-08-31'
-__updated__ = '2016-09-12'
+__updated__ = '05/17/2017'
 
 
 class Password(object):
     """ This class is used to encrypt and decrypt passwords."""
 
     def __init__(self,host=None,username=None,password=None,data_file_name=None,data_file_dir=None,mode='r'):
-        self.host = host
-        self.username = username
-        self.password = password
+        self._host = host
+        self._username = username
+        self._password = password
         self.error = False
         self.errmsg = None
         self.isOpen = False
-        self.encrypted_pswd = None
+        self._encrypted_pswd = None
+        self.return_encrypted = False  # flag to determine which version of password to return
         # name of file to store values
         if data_file_name:
-            self.data_file_name = data_file_name
+            self._data_file_name = data_file_name
         else:
-            self.data_file_name = ".pddatafile"
-        self.data_file_dir = data_file_dir
+            self._data_file_name = ".pddatafile"
+        self._data_file_dir = data_file_dir
         self.mode = 'c' if mode == 'w' else mode
         self.key_size = (SHA256.block_size * 3) / 8 + SHA256.digest_size
 
@@ -80,26 +88,48 @@ class Password(object):
         if self.isOpen:
             self.__close_datafile()
 
-    def set_hostname(self,host):
-        self.host = host
+    @property
+    def host(self):
+        return self._host
 
-    def set_username(self,username):
-        self.username = username
+    @host.setter
+    def host(self,value):
+        self._host = value
 
-    def set_password(self,password):
-        self.password = password
+    @property
+    def username(self):
+        return self._username
 
-    def set_data_file_dir(self,data_file_dir):
-        self.data_file_dir = data_file_dir
+    @username.setter
+    def username(self,value):
+        self._username = value
 
-    def set_data_file_name(self,data_file_name):
-        self.data_file_name = data_file_name
+    @property
+    def data_file_dir(self):
+        return self._data_file_dir
 
-    def get_password(self,enc_flag=False):
-        if enc_flag:
-            return self.encrypted_pswd
+    @data_file_dir.setter
+    def data_file_dir(self,value):
+        self._data_file_dir = value
+
+    @property
+    def data_file_name(self):
+        return self._data_file_name
+
+    @data_file_name.setter
+    def data_file_name(self,value):
+        self._data_file_name = value
+
+    @property
+    def password(self):
+        if self.return_encrypted:
+            return self._encrypted_pswd
         else:
-            return self.password
+            return self._password
+
+    @password.setter
+    def password(self,value):
+        self._password = value
 
     def is_error(self):
         return self.error
@@ -118,11 +148,11 @@ class Password(object):
         Private method: Create the key from the username and host
         """
         md = SHA256.new()
-        md.update(self.username)
-        if self.host:
-            md.update(self.host)
-            md.update(self.host[::-1])
-        md.update(self.username[::-1])
+        md.update(self._username)
+        if self._host:
+            md.update(self._host)
+            md.update(self._host[::-1])
+        md.update(self._username[::-1])
         return md.digest()  # create 32byte key
 
     def encrypt(self):
@@ -130,25 +160,25 @@ class Password(object):
         Encrypt the password
         :return:
         """
-        if self.password is None:
-            self.encrypted_pswd = None
+        if self._password is None:
+            self._encrypted_pswd = None
             self.error = True
             self.errmsg = 'Missing password to encrypt'
         else:
-            if self.username:
+            if self._username:
                 key = self.__create_key()
             else:
                 key = self.__generate_key()
-            pad = AES.block_size - len(self.password) % AES.block_size
-            data = self.password + chr(pad) * pad
+            pad = AES.block_size - len(self._password) % AES.block_size
+            data = self._password + chr(pad) * pad
             iv = os.urandom(AES.block_size)
             cipher = AES.new(key,AES.MODE_CBC,iv)
-            self.encrypted_pswd = base64.b64encode(iv + cipher.encrypt(data) + key)
+            self._encrypted_pswd = base64.b64encode(iv + cipher.encrypt(data) + key)
             self.error = False
             self.errmsg = None
-            if self.data_file_dir and self.username:
+            if self._data_file_dir and self._username:
                 self.__store_record()
-        return self.encrypted_pswd
+        return self._encrypted_pswd
 
     def decrypt(self,encrypted_password=None):
         """
@@ -157,11 +187,11 @@ class Password(object):
         :return:
         """
         if encrypted_password is None:
-            if self.username:
+            if self._username:
                 self.__retrieve_record()
-                encrypted_password = self.encrypted_pswd
+                encrypted_password = self._encrypted_pswd
             else:
-                self.password = 'NF'
+                self._password = 'NF'
                 self.error = True
                 self.errmsg = 'Missing User Name'
         if not self.error:
@@ -171,16 +201,16 @@ class Password(object):
             cipher = AES.new(key,AES.MODE_CBC,iv)
             temp_pswd = cipher.decrypt(data)
             decrypted_pwd = temp_pswd[:-ord(temp_pswd[-1])]
-            self.password = decrypted_pwd
+            self._password = decrypted_pwd
             self.error = False
-        return self.password
+        return self._password
 
     def remove_record(self):
         """ Remove a record from the data file """
         if not self.isOpen:
             self.__open_datafile()
         if not self.error:
-            if self.username:
+            if self._username:
                 self.__create_db_key()
                 if self.dbkey in self.datafile.keys():
                     del self.datafile[self.dbkey]
@@ -201,7 +231,11 @@ class Password(object):
             key_list = self.datafile.keys()
             entry_list = []
             for key in key_list:
-                entry_list.append(self.datafile[key])
+                if isinstance(self.datafile[key],str):
+                    rec = cPickle.loads(base64.b64decode(self.datafile[key]))
+                else:
+                    rec = self.datafile[key]
+                entry_list.append(rec)
             if self.isOpen:
                 self.__close_datafile()
             return entry_list
@@ -210,10 +244,10 @@ class Password(object):
 
     def __create_db_key(self):
         """ Create the database key for storing """
-        if self.host and self.username:
-            temp_key = self.username + '@' + self.host
+        if self._host and self._username:
+            temp_key = self._username + '@' + self._host
         else:
-            temp_key = self.username
+            temp_key = self._username
         self.dbkey = SHA256.new(temp_key).hexdigest()
         return self.dbkey
 
@@ -222,16 +256,20 @@ class Password(object):
         if not self.isOpen:
             self.__open_datafile()
         if not self.error:
-            if self.username:
+            if self._username:
                 self.__create_db_key()
                 if self.dbkey in self.datafile.keys():
-                    self.record = self.datafile[self.dbkey]
-                    self.dbname = self.record['host']
-                    self.username = self.record['username']
-                    self.encrypted_pswd = self.record['rsakey']
+                    record = self.datafile[self.dbkey]
+                    if isinstance(record,str):
+                        self.record = cPickle.loads(base64.b64decode(record))
+                    else:
+                        self.record = record
+                    self._host = self.record['host']
+                    self._username = self.record['username']
+                    self._encrypted_pswd = self.record['rsakey']
                     self.error = False
                 else:
-                    self.encrypted_pswd = ''
+                    self._encrypted_pswd = ''
                     self.error = True
                     self.errmsg = 'Record does not exist'
                     self.record = None
@@ -244,13 +282,13 @@ class Password(object):
 
     def __store_record(self):
         """ Store the record in the database """
-        self.record = {'host':self.host,'username':self.username,'rsakey':self.encrypted_pswd}
+        self.record = {'host':self._host,'username':self._username,'rsakey':self._encrypted_pswd}
         if not self.isOpen:
             self.__open_datafile()
         if not self.error:
             self.__create_db_key()
             try:
-                self.datafile[self.dbkey] = self.record
+                self.datafile[self.dbkey] = base64.b64encode(cPickle.dumps(self.record))
                 self.error = False
                 self.errmsg = None
             except:
@@ -262,9 +300,9 @@ class Password(object):
 
     def __open_datafile(self):
         """ Open the password file """
-        if os.path.isdir(self.data_file_dir):
+        if os.path.isdir(self._data_file_dir):
             try:
-                self.datafile = shelve.open(os.path.join(self.data_file_dir,self.data_file_name),flag=self.mode)
+                self.datafile = shelve.open(os.path.join(self._data_file_dir,self._data_file_name),flag=self.mode)
             except:
                 self.isOpen = False
                 self.error = True
@@ -277,10 +315,11 @@ class Password(object):
         else:
             self.isOpen = False
             self.error = True
-            if not os.path.isdir(self.data_file_dir):
-                self.errmsg = 'Directory [%s] NOT found' % str(self.data_file_dir)
-            elif not os.path.isfile(self.data_file_name):
-                self.errmsg = 'File [{0!s}] NOT found in directory {1!s}'.format(self.data_file_name,self.data_file_dir)
+            if not os.path.isdir(self._data_file_dir):
+                self.errmsg = 'Directory [%s] NOT found' % str(self._data_file_dir)
+            elif not os.path.isfile(self._data_file_name):
+                self.errmsg = 'File [{0!s}] NOT found in directory {1!s}'.format(self._data_file_name,
+                                                                                 self._data_file_dir)
             else:
                 self.errmsg = 'Cannot open data file'
 
@@ -319,15 +358,15 @@ class Password2(Password):
         :param password: Password to encrypt
         :return:
         """
-        plain_password = password or self.password
+        plain_password = password or self._password
         if not plain_password:
-            self.encrypted_pswd = None
+            self._encrypted_pswd = None
             self.error = True
             self.errmsg = 'Missing password to encrypt'
         else:
             if self.key:
                 key = self.key
-            elif self.username:
+            elif self._username:
                 key = self.__create_key()
             else:
                 key = self.__generate_key()
@@ -335,17 +374,17 @@ class Password2(Password):
             data = plain_password + chr(pad) * pad
             iv = os.urandom(AES.block_size)
             cipher = AES.new(key,AES.MODE_CBC,iv)
-            self.encrypted_pswd = base64.urlsafe_b64encode(iv + cipher.encrypt(data) + key)
+            self._encrypted_pswd = base64.urlsafe_b64encode(iv + cipher.encrypt(data) + key)
             self.error = False
             self.errmsg = None
-        return self.encrypted_pswd
+        return self._encrypted_pswd
 
     def save_to_file(self):
         """
         Save the data record to the file
         :return:
         """
-        if self.data_file_dir and self.username:
+        if self._data_file_dir and self._username:
             self.__store_record()
 
     def decrypt(self,encrypted_password=None):
@@ -355,7 +394,7 @@ class Password2(Password):
         :return:
         """
         if encrypted_password is None:
-            self.password = None
+            self._password = None
             self.error = True
             self.errmsg = 'Missing encrypted password'
         else:
@@ -365,18 +404,18 @@ class Password2(Password):
             cipher = AES.new(key,AES.MODE_CBC,iv)
             temp_pswd = cipher.decrypt(data)
             decrypted_pwd = temp_pswd[:-ord(temp_pswd[-1])]
-            self.password = decrypted_pwd
+            self._password = decrypted_pwd
             self.error = False
-        return self.password
+        return self._password
 
     def get_record(self):
         """
         Get record from file
         :return:
         """
-        if self.username:
+        if self._username:
             self.__retrieve_record()
         else:
-            self.password = 'NF'
+            self._password = 'NF'
             self.error = True
             self.errmsg = 'Missing User Name'
