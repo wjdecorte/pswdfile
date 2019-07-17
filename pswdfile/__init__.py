@@ -1,13 +1,4 @@
 """
-<PATH> __init__ - <DESCRIPTION>
-
-@author - jwd3
-
-@copyright:  2017 Equifax. All rights reserved.
-
-@license:    Apache License 2.0
-
-@contact:    jason.decorte@equifax.com
 
 Version History:
 05/15/2017 jwd3 

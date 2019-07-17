@@ -1,12 +1,12 @@
 from setuptools import setup, find_packages
 
-version = "3.0.0"
+version = "3.0.1"
 
 setup(
     name='pswdfile',
     version=version,
     packages=find_packages(),
-    url='http://scm.devcentral.equifax.com/svn/GISBI/trunk/app/python/dist/pswdfile-{0}.tar.gz'.format(version),
+    url='https://github.com/wjdecorte/pswdfile',
     license='GNU General Public License (GPL)',
     author='jwd3',
     author_email='jdecorte@decorteindustries.com',
@@ -21,7 +21,7 @@ setup(
         'Programming Language :: Python :: 2 :: Only'
     ],
     install_requires=[
-        'click==6.7',
+        'click==7.0',
         'pycrypto==2.6.1'
     ],
     include_package_data=True,
